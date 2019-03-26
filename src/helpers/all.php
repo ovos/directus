@@ -286,8 +286,8 @@ if (!function_exists('get_request_authorization_token')) {
             if ($authUser && (empty($authPassword) || $authUser === $authPassword)) {
                 $authToken = $authUser;
             }
-        } elseif (isset($_SERVER['REDIRECT_REMOTE_USER'])) {
-            $authorizationHeader = $_SERVER['REDIRECT_REMOTE_USER'];
+        } elseif ($request->hasHeader('Authorization')) {
+            $authorizationHeader = $request->getHeader('Authorization');
 
             // If there's multiple Authorization header, pick first, ignore the rest
             if (is_array($authorizationHeader)) {
