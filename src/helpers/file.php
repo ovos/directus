@@ -96,8 +96,7 @@ if (!function_exists('get_uploaded_file_status')) {
     }
 }
 
-if (!function_exists('append_storage_information'))
-{
+if (!function_exists('append_storage_information')) {
     /**
      * append storage information to one or multiple file items
      *
@@ -107,6 +106,7 @@ if (!function_exists('append_storage_information'))
      */
     function append_storage_information(array $rows)
     {
+
         if (empty($rows)) {
             return $rows;
         }
@@ -114,6 +114,7 @@ if (!function_exists('append_storage_information'))
         $container = Application::getInstance()->getContainer();
 
         $config = $container->get('config');
+        $proxyDownloads = $config->get('storage.proxy_downloads');
         $fileRootUrl = $config->get('storage.root_url');
         $hasFileRootUrlHost = parse_url($fileRootUrl, PHP_URL_HOST);
         $isLocalStorageAdapter = $config->get('storage.adapter') == 'local';
@@ -125,11 +126,17 @@ if (!function_exists('append_storage_information'))
 
         foreach ($rows as &$row) {
             $data = [];
-            $data['url'] = $data['full_url'] = $fileRootUrl . '/' . $row['filename'];
 
-            // Add Full url
-            if ($isLocalStorageAdapter && !$hasFileRootUrlHost) {
+            if ($proxyDownloads) {
+                $data['url'] = get_proxy_path($row['filename']);
                 $data['full_url'] = get_url($data['url']);
+            } else {
+                $data['url'] = $data['full_url'] = $fileRootUrl . '/' . $row['filename'];
+
+                // Add Full url
+                if ($isLocalStorageAdapter && !$hasFileRootUrlHost) {
+                    $data['full_url'] = get_url($data['url']);
+                }
             }
 
             // Add Thumbnails
@@ -143,11 +150,12 @@ if (!function_exists('append_storage_information'))
             if ($provider) {
                 $embed = [
                     'html' => $provider->getCode($row),
-                    'url' => $provider->getUrl($row)
+                    'url' => $provider->getUrl($row),
                 ];
             }
 
             $data['embed'] = $embed;
+
             $row['data'] = $data;
         }
 
@@ -207,14 +215,14 @@ if (!function_exists('get_thumbnails')) {
 
             $size = explode('x', $dimension);
             if (count($size) == 2) {
-                $thumbnailUrl =  get_thumbnail_url($filename, $size[0], $size[1]);
+                $thumbnailUrl = get_thumbnail_url($filename, $size[0], $size[1]);
                 $thumbnailRelativeUrl = get_thumbnail_path($filename, $size[0], $size[1]);
                 $thumbnails[] = [
                     'url' => $thumbnailUrl,
                     'relative_url' => $thumbnailRelativeUrl,
                     'dimension' => $dimension,
                     'width' => (int) $size[0],
-                    'height' => (int) $size[1]
+                    'height' => (int) $size[1],
                 ];
             }
         }
@@ -223,8 +231,7 @@ if (!function_exists('get_thumbnails')) {
     }
 }
 
-if (!function_exists('get_thumbnail_url'))
-{
+if (!function_exists('get_thumbnail_url')) {
     /**
      * Returns a url for the given file pointing to the thumbnailer
      *
@@ -242,8 +249,7 @@ if (!function_exists('get_thumbnail_url'))
     }
 }
 
-if (!function_exists('get_thumbnail_path'))
-{
+if (!function_exists('get_thumbnail_path')) {
     /**
      * Returns a relative url for the given file pointing to the thumbnailer
      *
@@ -262,7 +268,32 @@ if (!function_exists('get_thumbnail_path'))
         // env/width/height/mode/quality/name
         return sprintf(
             '/thumbnail/%s/%d/%d/%s/%s/%s',
-            $projectName, $width, $height, $mode, $quality, $name
+            $projectName,
+            $width,
+            $height,
+            $mode,
+            $quality,
+            $name
+        );
+    }
+}
+
+if (!function_exists('get_proxy_path')) {
+    /**
+     * Returns a relative url for the given file pointing to the proxy
+     *
+     * @param string $path
+     *
+     * @return string
+     */
+    function get_proxy_path($path)
+    {
+        $projectName = get_api_project_from_request();
+
+        // env/width/height/mode/quality/name
+        return sprintf(
+            '/downloads/%s/%s',
+            $projectName, $path
         );
     }
 }

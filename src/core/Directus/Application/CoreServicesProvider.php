@@ -7,6 +7,7 @@ use Cache\Adapter\Apcu\ApcuCachePool;
 use Cache\Adapter\Common\PhpCachePool;
 use Cache\Adapter\Filesystem\FilesystemCachePool;
 use Cache\Adapter\Memcached\MemcachedCachePool;
+use Cache\Adapter\Memcache\MemcacheCachePool;
 use Cache\Adapter\PHPArray\ArrayCachePool;
 use Cache\Adapter\Redis\RedisCachePool;
 use Cache\Adapter\Void\VoidCachePool;
@@ -182,16 +183,18 @@ class CoreServicesProvider
             $cacheTableTagInvalidator = function ($tableName) use ($cachePool) {
                 $cachePool->invalidateTags(['table_' . $tableName]);
             };
-
-            foreach (['item.update:after', 'collection.delete:after'] as $action) {
+            foreach (['item.create:after', 'item.delete:after', 'item.update:after', 'collection.update:after', 'collection.delete:after'] as $action) {
                 $emitter->addAction($action, $cacheTableTagInvalidator);
             }
 
-            $emitter->addAction('item.delete:after', function ($tableName, $ids) use ($cachePool) {
+            $cacheEntityTagInvalidator = function ($tableName, $ids) use ($cachePool) {
                 foreach ($ids as $id) {
                     $cachePool->invalidateTags(['entity_' . $tableName . '_' . $id]);
                 }
-            });
+            };
+            foreach (['item.delete:after', 'item.update:after'] as $action) {
+                $emitter->addAction($action, $cacheEntityTagInvalidator);
+            }
 
             $emitter->addAction('item.update.directus_permissions:after', function ($data) use ($container, $cachePool) {
                 $acl = $container->get('acl');
@@ -443,7 +446,7 @@ class CoreServicesProvider
 
                     if ($decode === true) {
                         $value = is_string($value) ? json_decode($value) : $value;
-                    } else if ($value !== null) {
+                    } elseif ($value !== null) {
                         $value = !is_string($value) ? json_encode($value) : $value;
                     }
 
@@ -522,6 +525,7 @@ class CoreServicesProvider
             // -------------------------------------------------------------------------------------------
             // Add file url and thumb url
             $emitter->addFilter('item.read.directus_files', function (Payload $payload) use ($addFilesUrl, $container) {
+
                 $rows = $addFilesUrl($payload->getData());
 
                 $payload->replace($rows);
@@ -538,7 +542,7 @@ class CoreServicesProvider
                     ];
                     // Authenticated user can see their private info
                     // Admin can see all users private info
-                    if (!$acl->isAdmin() && $userId !== $row['id']) {
+                    if (!$acl->isAdmin() && $userId !== (int)$row['id']) {
                         $omit = array_merge($omit, [
                             'token',
                             'email_notifications',
@@ -627,10 +631,10 @@ class CoreServicesProvider
                         }
 
                         $payload->set($key, $dateTimeValue);
-                    } else if (DataTypes::isDateType($type)) {
+                    } elseif (DataTypes::isDateType($type)) {
                         $dateTime = new DateTimeUtils($value);
                         $payload->set($key, $dateTime->toString(DateTimeUtils::DEFAULT_DATE_FORMAT));
-                    } else if (DataTypes::isTimeType($type)) {
+                    } elseif (DataTypes::isTimeType($type)) {
                         $dateTime = new DateTimeUtils($value);
                         $payload->set($key, $dateTime->toString(DateTimeUtils::DEFAULT_TIME_FORMAT));
                     }
@@ -638,18 +642,7 @@ class CoreServicesProvider
 
                 return $payload;
             };
-            $preventNonAdminFromUpdateRoles = function (array $payload) use ($container) {
-                /** @var Acl $acl */
-                $acl = $container->get('acl');
 
-                if (!$acl->isAdmin()) {
-                    throw new ForbiddenException('You are not allowed to create, update or delete roles');
-                }
-            };
-
-            $emitter->addAction('item.create.directus_user_roles:before', $preventNonAdminFromUpdateRoles);
-            $emitter->addAction('item.update.directus_user_roles:before', $preventNonAdminFromUpdateRoles);
-            $emitter->addAction('item.delete.directus_user_roles:before', $preventNonAdminFromUpdateRoles);
             $generateExternalId = function (Payload $payload) {
                 // generate an external id if none is passed
                 if (!$payload->get('external_id')) {
@@ -900,8 +893,8 @@ class CoreServicesProvider
             if (is_object($poolConfig) && $poolConfig instanceof PhpCachePool) {
                 $pool = $poolConfig;
             } else {
-                if (!in_array($poolConfig['adapter'], ['apc', 'apcu', 'array', 'filesystem', 'memcached', 'redis', 'void'])) {
-                    throw new \Exception("Valid cache adapters are 'apc', 'apcu', 'filesystem', 'memcached', 'redis'");
+                if (!in_array($poolConfig['adapter'], ['apc', 'apcu', 'array', 'filesystem', 'memcached', 'memcache', 'redis', 'void'])) {
+                    throw new \Exception("Valid cache adapters are 'apc', 'apcu', 'filesystem', 'memcached', 'memcache', 'redis'");
                 }
 
                 $pool = new VoidCachePool();
@@ -937,21 +930,42 @@ class CoreServicesProvider
                     $pool = new FilesystemCachePool($filesystem);
                 }
 
-                if ($adapter == 'memcached') {
-                    $host = (isset($poolConfig['host'])) ? $poolConfig['host'] : 'localhost';
-                    $port = (isset($poolConfig['port'])) ? $poolConfig['port'] : 11211;
+                if ($adapter == 'memcached' || $adapter == 'memcache') {
+                    $client = $adapter == 'memcached' ? new \Memcached() : new \Memcache();
+                    if (isset($poolConfig['url'])) {
+                        $urls = explode(';', $poolConfig['url']);
+                        if ($urls ===  false) {
+                            $urls = 'localhost:11211';
+                        }
+                        foreach ($urls as $url) {
+                            $parts = parse_url($url);
+                            $host = (isset($parts['host'])) ? $parts['host'] : 'localhost';
+                            $port = (isset($parts['port'])) ? $parts['port'] : 11211;
 
-                    $client = new \Memcached();
-                    $client->addServer($host, $port);
-                    $pool = new MemcachedCachePool($client);
+                            $client->addServer($host, $port);
+                        }
+                    } else {
+                        $host = (isset($poolConfig['host'])) ? $poolConfig['host'] : 'localhost';
+                        $port = (isset($poolConfig['port'])) ? $poolConfig['port'] : 11211;
+
+                        $client->addServer($host, $port);
+                    }
+                    $pool = $adapter == 'memcached' ? new MemcachedCachePool($client) : new MemcacheCachePool($client);
                 }
 
                 if ($adapter == 'redis') {
                     $host = (isset($poolConfig['host'])) ? $poolConfig['host'] : 'localhost';
                     $port = (isset($poolConfig['port'])) ? $poolConfig['port'] : 6379;
+                    $socket = (isset($poolConfig['socket'])) ? $poolConfig['socket'] : null;
 
                     $client = new \Redis();
-                    $client->connect($host, $port);
+
+                    if ($socket) {
+                        $client->connect($socket);
+                    } else {
+                        $client->connect($host, $port);
+                    }
+
                     $pool = new RedisCachePool($client);
                 }
             }
@@ -972,12 +986,12 @@ class CoreServicesProvider
             switch ($databaseName) {
                 case 'MySQL':
                     return new \Directus\Database\Schema\Sources\MySQLSchema($adapter);
-                // case 'SQLServer':
-                //    return new SQLServerSchema($adapter);
-                // case 'SQLite':
-                //     return new \Directus\Database\Schemas\Sources\SQLiteSchema($adapter);
-                // case 'PostgreSQL':
-                //     return new PostgresSchema($adapter);
+                    // case 'SQLServer':
+                    //    return new SQLServerSchema($adapter);
+                    // case 'SQLite':
+                    //     return new \Directus\Database\Schemas\Sources\SQLiteSchema($adapter);
+                    // case 'PostgreSQL':
+                    //     return new PostgresSchema($adapter);
             }
 
             throw new \Exception('Unknown/Unsupported database: ' . $databaseName);
@@ -1290,4 +1304,3 @@ class CoreServicesProvider
         return $storageConfig;
     }
 }
-
