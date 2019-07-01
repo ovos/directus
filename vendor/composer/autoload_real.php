@@ -29,13 +29,22 @@ class ComposerAutoloaderInitfef58229980f2c70347e4b7e9e7c5e1c
 
             call_user_func(\Composer\Autoload\ComposerStaticInitfef58229980f2c70347e4b7e9e7c5e1c::getInitializer($loader));
         } else {
+            $map = require __DIR__ . '/autoload_namespaces.php';
+            foreach ($map as $namespace => $path) {
+                $loader->set($namespace, $path);
+            }
+
+            $map = require __DIR__ . '/autoload_psr4.php';
+            foreach ($map as $namespace => $path) {
+                $loader->setPsr4($namespace, $path);
+            }
+
             $classMap = require __DIR__ . '/autoload_classmap.php';
             if ($classMap) {
                 $loader->addClassMap($classMap);
             }
         }
 
-        $loader->setClassMapAuthoritative(true);
         $loader->register(true);
 
         if ($useStaticLoader) {
