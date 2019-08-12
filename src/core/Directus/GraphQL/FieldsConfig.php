@@ -1,4 +1,5 @@
 <?php
+
 namespace Directus\GraphQL;
 
 use Directus\GraphQL\Types;
@@ -83,6 +84,10 @@ class FieldsConfig
                 case 'time':
                     $fields[$v['field']] = Types::time();
                     break;
+                case 'translation':
+                    $relation = $this->getRelation('translation', $v['collection'], $v['field']);
+                    $fields[$v['field']] = Types::listOf(Types::userCollection($relation['collection_many']));
+                    break;
                 case 'user_created':
                 case 'user_updated':
                     $fields[$v['field']] = Types::directusUser();
@@ -164,6 +169,8 @@ class FieldsConfig
                     $filters[$v['field'] . '_nin'] = Types::string();
                     break;
                 case 'string':
+                    $filters[$v['field'] . '_eq'] = Types::string();
+                    $filters[$v['field'] . '_neq'] = Types::string();
                     $filters[$v['field'] . '_contains'] = Types::string();
                     $filters[$v['field'] . '_ncontains'] = Types::string();
                     $filters[$v['field'] . '_rlike'] = Types::string();
@@ -232,6 +239,14 @@ class FieldsConfig
                     $relation = $firstRelation;
                 }
 
+                break;
+            case 'translation':
+                foreach ($relationsData['data'] as $k => $v) {
+                    if ($v['collection_one'] == $collection && $v['field_one'] == $field) {
+                        $relation = $v;
+                        break;
+                    }
+                }
                 break;
         }
 

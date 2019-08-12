@@ -5,6 +5,7 @@ namespace Directus\Filesystem;
 use Directus\Application\Application;
 use function Directus\filename_put_ext;
 use function Directus\generate_uuid5;
+use function Directus\is_a_url;
 use Directus\Util\ArrayUtils;
 use Directus\Util\DateTimeUtils;
 use Directus\Util\Formatting;
@@ -33,7 +34,8 @@ class Files
     private $defaults = [
         'description' => '',
         'tags' => '',
-        'location' => ''
+        'location' => '',
+        'charset' => ''
     ];
 
     /**
@@ -256,12 +258,17 @@ class Files
     {
         // When file is uploaded via multipart form data then We will get object of Slim\Http\UploadFile
         // When file is uploaded via URL (Youtube, Vimeo, or image link) then we will get base64 encode string.
-        if (is_object($fileData)) {
+        $size = null;
 
+        $title = $fileName;
+
+        if (is_object($fileData)) {
+            $size = $fileData->getSize();
             $checksum = hash_file('md5', $fileData->file);
         } else {
             $fileData = base64_decode($this->getDataInfo($fileData)['data']);
             $checksum = md5($fileData);
+            $size = strlen($fileData);
         }
         // @TODO: merge with upload()
         $fileName = $this->getFileName($fileName, $replace !== true);
@@ -270,14 +277,14 @@ class Files
 
 
 
-        $this->emitter->run('file.save', ['name' => $fileName, 'size' => strlen($fileData)]);
+        $this->emitter->run('file.save', ['name' => $fileName, 'size' => $size]);
         $this->write($fileName, $fileData, $replace);
-        $this->emitter->run('file.save:after', ['name' => $fileName, 'size' => strlen($fileData)]);
+        $this->emitter->run('file.save:after', ['name' => $fileName, 'size' => $size]);
 
         unset($fileData);
 
         $fileData = $this->getFileInfo($fileName);
-        $fileData['title'] = Formatting::fileNameToFileTitle($fileName);
+        $fileData['title'] = Formatting::fileNameToFileTitle($title);
         $fileData['filename'] = basename($filePath);
         $fileData['storage'] = $this->config['adapter'];
 
@@ -591,7 +598,7 @@ class Files
 
             if (preg_match($trailingDigit, $fileName, $matches)) {
                 // Convert "fname-1.jpg" to "fname-2.jpg"
-                $attempt = 1 + (int)$matches[1];
+                $attempt = 1 + (int) $matches[1];
                 $newName = preg_replace(
                     $trailingDigit,
                     filename_put_ext("-{$attempt}", $ext),
@@ -668,5 +675,31 @@ class Files
         $ini += strlen($start);
         $len = strpos($string, $end, $ini) - $ini;
         return substr($string, $ini, $len);
+    }
+    /**
+     * Get a file size and type info from base64 data , URL ,multipart form data
+     * 
+     * @param string $data
+     *
+     * @return array file size and type
+     */
+    public function getFileSizeType($data)
+    {
+        $result=[];
+        if (is_a_url($data)) {
+            $dataInfo = $this->getLink($data);
+            $result['mimeType'] = isset($dataInfo['type']) ? $dataInfo['type'] : null;
+            $result['size'] = isset($dataInfo['filesize']) ? $dataInfo['filesize'] : (isset($dataInfo['size']) ? $dataInfo['size'] : null);
+        }else if(is_object($data)) {
+            $result['mimeType']=$data->getClientMediaType();
+            $result['size']=$data->getSize();
+        }else if(strpos($data, 'data:') === 0){
+            $parts = explode(',', $data);
+            $file = $parts[1];
+            $dataInfo = $this->getFileInfoFromData(base64_decode($file));
+            $result['mimeType'] = isset($dataInfo['type']) ? $dataInfo['type'] : null;
+            $result['size'] = isset($dataInfo['size']) ? $dataInfo['size'] : null;
+        }
+        return $result;
     }
 }
