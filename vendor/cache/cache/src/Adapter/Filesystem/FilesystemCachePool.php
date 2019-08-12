@@ -141,11 +141,9 @@ class FilesystemCachePool extends AbstractCachePool
      */
     private function getFilePath($key)
     {
-        if (!preg_match('|^[a-zA-Z0-9_\.! ]+$|', $key)) {
-            throw new InvalidArgumentException(sprintf('Invalid key "%s". Valid filenames must match [a-zA-Z0-9_\.! ].', $key));
-        }
-
-        return sprintf('%s/%s', $this->folder, $key);
+    	// modified by af
+		$key = sha1($key);
+		return sprintf('%s/%s', $this->folder, $key);
     }
 
     /**
